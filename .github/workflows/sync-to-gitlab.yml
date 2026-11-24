@@ -1,9 +1,6 @@
-name: Sync GitHub main to GitLab
+name: Manual sync GitHub main to GitLab
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
