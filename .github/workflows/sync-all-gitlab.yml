@@ -26,6 +26,7 @@ jobs:
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
           SOURCE_GITHUB_TOKEN: ${{ secrets.SOURCE_GITHUB_TOKEN }}
+          SOURCE_GITHUB_TOKEN_PRIVATE: ${{ secrets.SOURCE_GITHUB_TOKEN_PRIVATE }}
         run: |
           set -Eeuo pipefail
           if [[ -z "${GITLAB_TOKEN:-}" ]]; then
@@ -70,27 +71,35 @@ jobs:
           workdir="$(mktemp -d)"
           trap 'rm -rf "$workdir"' EXIT
 
-          if [[ -n "${SOURCE_GITHUB_TOKEN:-}" ]]; then
-            github_auth="$(printf 'x-access-token:%s' "$SOURCE_GITHUB_TOKEN" | base64 -w0)"
-          else
-            github_auth=""
-          fi
-
           while IFS='|' read -r source target branch; do
             [[ -n "$source" ]] || continue
             total=$((total + 1))
             dir="$workdir/repo-$total"
             echo "::group::${source} -> ${target} (${branch})"
 
-            if [[ -n "$github_auth" ]]; then
+            # Use the dedicated token only for the four repositories it is scoped to.
+            case "$source" in
+              p5hzehxa/workflows-starter-templat|p5hzehxa/skills-expand-your-team-with-copilot|p5hzehxa/agent-visibility-template|p5hzehxa/remote-mcp-server-authless)
+                repo_token="${SOURCE_GITHUB_TOKEN_PRIVATE:-}"
+                token_name="SOURCE_GITHUB_TOKEN_PRIVATE"
+                ;;
+              *)
+                repo_token="${SOURCE_GITHUB_TOKEN:-}"
+                token_name="SOURCE_GITHUB_TOKEN"
+                ;;
+            esac
+
+            if [[ -n "$repo_token" ]]; then
+              github_auth="$(printf 'x-access-token:%s' "$repo_token" | base64 -w0)"
               clone_ok=0
               git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $github_auth" clone --quiet --no-tags --single-branch --branch "$branch" "https://github.com/$source.git" "$dir" || clone_ok=$?
             else
               clone_ok=0
               git clone --quiet --no-tags --single-branch --branch "$branch" "https://github.com/$source.git" "$dir" || clone_ok=$?
             fi
+            unset repo_token github_auth
             if (( clone_ok != 0 )); then
-              echo "::error::Could not clone source branch: $source ($branch). Private repositories require SOURCE_GITHUB_TOKEN with read access."
+              echo "::error::Could not clone source branch: $source ($branch). Check $token_name has Contents: Read access to this repository."
               failures=$((failures + 1))
               echo "::endgroup::"
               continue
