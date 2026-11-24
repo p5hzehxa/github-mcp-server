@@ -1,0 +1,55 @@
+name: Sync GitHub main to GitLab
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-to-gitlab-main
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out GitHub repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate GitLab token
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          if [ -z "$GITLAB_TOKEN" ]; then
+            echo "::error::Repository secret GITLAB_TOKEN is missing."
+            exit 1
+          fi
+
+      - name: Push main to GitLab (fast-forward only)
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ASKPASS="$RUNNER_TEMP/gitlab-askpass.sh"
+          trap 'rm -f "$ASKPASS"' EXIT
+          cat > "$ASKPASS" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' "oauth2" ;;
+            *Password*) printf '%s\n' "$GITLAB_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          EOF
+          chmod 700 "$ASKPASS"
+          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+            git push --porcelain https://gitlab.com/sharar1/github-mcp-server.git \
+            HEAD:refs/heads/main
