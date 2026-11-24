@@ -1,0 +1,101 @@
+name: Sync verified GitHub repositories to GitLab
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sync-all-gitlab.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitlab-bulk-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Sync verified default branches (fast-forward only)
+        shell: bash
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${GITLAB_TOKEN:-}" ]]; then
+            echo "::error::GITLAB_TOKEN secret is missing in this controller repository."
+            exit 1
+          fi
+
+          # source GitHub repository | target GitLab project | branch
+          repos=$(cat <<'EOF'
+          p5hzehxa/github-mcp-server|sharar1/github-mcp-server|main
+          p5hzehxa/google-api-nodejs-client|sharar1/google-api-nodejs-client|main
+          p5hzehxa/licensecheck|sharar1/licensecheck|main
+          p5hzehxa/skills-create-applications-with-the-copilot-cli|sharar1/skills-create-applications-with-the-copilot-cli|main
+          p5hzehxa/google.aip.dev|sharar1/google-aip-dev|master
+          p5hzehxa/cloudflare-docs|sharar1/cloudflare-docs|production
+          p5hzehxa/setup-node|sharar1/setup-node|main
+          p5hzehxa/Article.RDP.Python.GreenhouseGasEmissions|sharar1/Article-RDP-Python-GreenhouseGasEmissions|main
+          p5hzehxa/repository-scanner|sharar1/repository-scanner|main
+          p5hzehxa/websocket-api|sharar1/websocket-api|master
+          p5hzehxa/servers|sharar1/servers|main
+          p5hzehxa/react-router-hono-fullstack-template|sharar1/react-router-hono-fullstack-template|main
+          p5hzehxa/css-succession-receipts|sharar1/css-succession-receipts|main
+          p5hzehxa/next-platform-starter|sharar1/next-platform-starter|main
+          p5hzehxa/smee.io|sharar1/smee-io|master
+          p5hzehxa/clerk-netlify-template|sharar1/clerk-netlify-template|main
+          p5hzehxa/remote-mcp-server|sharar1/remote-mcp-server|main
+          p5hzehxa/brave-browser|sharar1/brave-browser|master
+          p5hzehxa/workflows-starter-templat|sharar1/workflows-starter-templat|main
+          p5hzehxa/vite-react-template|sharar1/vite-react-template|main
+          p5hzehxa/skills-expand-your-team-with-copilot|sharar1/skills-expand-your-team-with-copilot|main
+          p5hzehxa/ComfyUI|sharar1/ComfyUI|master
+          p5hzehxa/jlord|sharar1/jlord|master
+          p5hzehxa/p5hzehxa|sharar1/p5hzehxa|main
+          p5hzehxa/agent-visibility-template|sharar1/agent-visibility-template|main
+          p5hzehxa/remote-mcp-server-authless|sharar1/remote-mcp-server-authless|main
+          p5hzehxa/test-repo1|sharar1/test-repo1|gh-pages
+          EOF
+          )
+
+          failures=0
+          total=0
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+
+          while IFS='|' read -r source target branch; do
+            [[ -n "$source" ]] || continue
+            total=$((total + 1))
+            dir="$workdir/repo-$total"
+            echo "::group::${source} -> ${target} (${branch})"
+
+            if ! git clone --quiet --no-tags --single-branch --branch "$branch" "https://github.com/$source.git" "$dir"; then
+              echo "::error::Could not clone source branch: $source ($branch)"
+              failures=$((failures + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            git -C "$dir" remote add gitlab "https://oauth2:${GITLAB_TOKEN}@gitlab.com/$target.git"
+
+            # No force, no mirror deletion, no branch rewriting. Git rejects non-fast-forward updates.
+            if git -C "$dir" -c credential.interactive=never push --porcelain gitlab "HEAD:refs/heads/$branch"; then
+              echo "Push accepted (already up to date or fast-forward)."
+            else
+              echo "::error::Push rejected for $target. No force push was attempted; inspect divergence or permissions."
+              failures=$((failures + 1))
+            fi
+
+            echo "::endgroup::"
+          done <<< "$repos"
+
+          echo "Repositories checked: $total; failures: $failures"
+          if (( failures > 0 )); then
+            exit 1
+          fi
