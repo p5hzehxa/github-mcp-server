@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: github-to-gitlab-main
-  cancel-in-progress: true
+  group: gitlab-bulk-sync
+  cancel-in-progress: false
 
 jobs:
   sync:
