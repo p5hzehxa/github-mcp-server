@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/sync-all-gitlab.yml"
+      - ".github/workflows/sync-to-gitlab.yml"
 
 permissions:
   contents: read
