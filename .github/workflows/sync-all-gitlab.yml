@@ -25,6 +25,7 @@ jobs:
         shell: bash
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          SOURCE_GITHUB_TOKEN: ${{ secrets.SOURCE_GITHUB_TOKEN }}
         run: |
           set -Eeuo pipefail
           if [[ -z "${GITLAB_TOKEN:-}" ]]; then
@@ -69,14 +70,27 @@ jobs:
           workdir="$(mktemp -d)"
           trap 'rm -rf "$workdir"' EXIT
 
+          if [[ -n "${SOURCE_GITHUB_TOKEN:-}" ]]; then
+            github_auth="$(printf 'x-access-token:%s' "$SOURCE_GITHUB_TOKEN" | base64 -w0)"
+          else
+            github_auth=""
+          fi
+
           while IFS='|' read -r source target branch; do
             [[ -n "$source" ]] || continue
             total=$((total + 1))
             dir="$workdir/repo-$total"
             echo "::group::${source} -> ${target} (${branch})"
 
-            if ! git clone --quiet --no-tags --single-branch --branch "$branch" "https://github.com/$source.git" "$dir"; then
-              echo "::error::Could not clone source branch: $source ($branch)"
+            if [[ -n "$github_auth" ]]; then
+              clone_ok=0
+              git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $github_auth" clone --quiet --no-tags --single-branch --branch "$branch" "https://github.com/$source.git" "$dir" || clone_ok=$?
+            else
+              clone_ok=0
+              git clone --quiet --no-tags --single-branch --branch "$branch" "https://github.com/$source.git" "$dir" || clone_ok=$?
+            fi
+            if (( clone_ok != 0 )); then
+              echo "::error::Could not clone source branch: $source ($branch). Private repositories require SOURCE_GITHUB_TOKEN with read access."
               failures=$((failures + 1))
               echo "::endgroup::"
               continue
