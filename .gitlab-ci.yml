@@ -1,0 +1,71 @@
+# CI configuration for GitLab validation; publish/deploy jobs are intentionally excluded.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+stages:
+  - ui
+  - verify
+  - lint
+
+default:
+  interruptible: true
+
+variables:
+  GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
+  GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
+  npm_config_cache: "$CI_PROJECT_DIR/.cache/npm"
+
+ui-build:
+  stage: ui
+  image: node:22-bookworm
+  script:
+    - cd ui
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - pkg/github/ui_dist/
+    expire_in: 1 day
+  cache:
+    key:
+      files:
+        - ui/package-lock.json
+    paths:
+      - .cache/npm/
+
+go-verify:
+  stage: verify
+  image: golang:1.27.1-bookworm
+  needs:
+    - job: ui-build
+      artifacts: true
+  script:
+    - go version
+    - go mod tidy -diff
+    - go test -race ./...
+    - go vet ./...
+    - go build -v ./cmd/github-mcp-server
+  cache:
+    key: go-mod-cache
+    paths:
+      - .cache/go/pkg/mod/
+      - .cache/go-build/
+
+golangci-lint:
+  stage: lint
+  image: golangci/golangci-lint:v2.9.0
+  needs:
+    - job: ui-build
+      artifacts: true
+  script:
+    - golangci-lint --version
+    - golangci-lint run
+  cache:
+    key: go-mod-cache
+    paths:
+      - .cache/go/pkg/mod/
+      - .cache/go-build/
