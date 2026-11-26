@@ -50,7 +50,9 @@ go-verify:
     - go vet ./...
     - go build -v ./cmd/github-mcp-server
   cache:
-    key: go-mod-cache
+    key:
+      files:
+        - go.sum
     paths:
       - .cache/go/pkg/mod/
       - .cache/go-build/
@@ -65,7 +67,10 @@ golangci-lint:
     - golangci-lint --version
     - golangci-lint run
   cache:
-    key: go-mod-cache
+    key:
+      prefix: golangci-lint-
+      files:
+        - go.sum
     paths:
       - .cache/go/pkg/mod/
       - .cache/go-build/
